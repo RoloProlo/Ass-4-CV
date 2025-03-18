@@ -4,8 +4,6 @@ import torch
 import xml.etree.ElementTree as ET
 import numpy as np
 import torchvision.transforms as T
-from torch.utils.data import Dataset, DataLoader, Subset
-from sklearn.model_selection import train_test_split
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -17,13 +15,11 @@ IMG_SIZE = 112  # Target image size (112x112x3)
 
 
 # Dataset class for loading images and annotations
-class CatDogDataset(Dataset):
-    def __init__(self, img_dir, ann_dir, transform=None):
-        self.img_dir = img_dir
-        self.ann_dir = ann_dir
+class CatDogDataset:
+    def __init__(self, img_files, ann_files, transform=None):
+        self.img_files = img_files
+        self.ann_files = ann_files
         self.transform = transform
-        self.img_files = sorted(glob.glob(os.path.join(img_dir, "*.png")))
-        self.ann_files = sorted(glob.glob(os.path.join(ann_dir, "*.xml")))
         self.label_map = {"cat": 0, "dog": 1}  # Label mapping
 
     def parse_annotation(self, ann_path):
@@ -84,27 +80,57 @@ transform = T.Compose([
 ])
 
 
-# Function to split dataset into stratified train/val sets
-def split_dataset():
+# Function to manually split dataset with stratification
+def stratified_split():
     print("Loading dataset...")
-    dataset = CatDogDataset(img_dir=IMG_DIR, ann_dir=ANNOTATION_DIR, transform=transform)
 
-    labels = [img_path.split("/")[-1][0] for img_path in dataset.img_files]  # Extract first letter (e.g., 'c' for cat)
-    train_indices, val_indices = train_test_split(
-        np.arange(len(dataset)), test_size=0.2, stratify=labels, random_state=42
-    )
+    # Load all image and annotation file paths
+    img_files = sorted(glob.glob(os.path.join(IMG_DIR, "*.png")))
+    ann_files = sorted(glob.glob(os.path.join(ANNOTATION_DIR, "*.xml")))
 
-    train_dataset = Subset(dataset, train_indices)
-    val_dataset = Subset(dataset, val_indices)
+    # Separate images into categories
+    cat_files = [(img, ann) for img, ann in zip(img_files, ann_files) if "cat" in img.lower()]
+    dog_files = [(img, ann) for img, ann in zip(img_files, ann_files) if "dog" in img.lower()]
 
-    print(f"Dataset split complete: {len(train_dataset)} training samples, {len(val_dataset)} validation samples.")
+    # Shuffle each category
+    np.random.seed(42)  # Set seed for reproducibility
+    np.random.shuffle(cat_files)
+    np.random.shuffle(dog_files)
+
+    # Compute 80/20 split index
+    cat_split = int(len(cat_files) * 0.8)
+    dog_split = int(len(dog_files) * 0.8)
+
+    # Split into train and validation sets
+    train_data = cat_files[:cat_split] + dog_files[:dog_split]
+    val_data = cat_files[cat_split:] + dog_files[dog_split:]
+
+    # Shuffle final datasets again (to mix cats and dogs)
+    np.random.shuffle(train_data)
+    np.random.shuffle(val_data)
+
+    # Extract separate lists for images and annotations
+    train_img_files, train_ann_files = zip(*train_data)
+    val_img_files, val_ann_files = zip(*val_data)
+
+    # Create dataset instances
+    train_dataset = CatDogDataset(list(train_img_files), list(train_ann_files), transform=transform)
+    val_dataset = CatDogDataset(list(val_img_files), list(val_ann_files), transform=transform)
+
+    print(f"Stratified split complete: {len(train_dataset)} training samples, {len(val_dataset)} validation samples.")
     return train_dataset, val_dataset
 
 
 # Function to visualize sample images with bounding boxes
 def visualize_samples(dataset, num_samples=4):
-    dataloader = DataLoader(dataset, batch_size=num_samples, shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
-    images, bboxes, labels, img_paths = next(iter(dataloader))
+    images, bboxes, labels, img_paths = [], [], [], []
+
+    for i in range(num_samples):
+        img, bbox, label, path = dataset[i]
+        images.append(img)
+        bboxes.append(bbox)
+        labels.append(label)
+        img_paths.append(path)
 
     fig, axes = plt.subplots(1, len(images), figsize=(15, 5))
 
@@ -130,7 +156,7 @@ def visualize_samples(dataset, num_samples=4):
 
 # Main execution
 if __name__ == "__main__":
-    train_dataset, val_dataset = split_dataset()
+    train_dataset, val_dataset = stratified_split()
 
     print("Visualizing training samples...")
     visualize_samples(train_dataset)
