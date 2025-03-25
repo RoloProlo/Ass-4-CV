@@ -6,6 +6,8 @@ import numpy as np
 from tqdm import tqdm
 import os
 
+# Dit is een comment voor saus
+
 def collate_fn(batch):
     """
     Custom collate function to handle variable-length bounding boxes and labels in the DataLoader batch.
