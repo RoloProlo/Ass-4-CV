@@ -47,12 +47,13 @@ class SmallObjectDetector(nn.Module):
 
         return x
 
-# Instantiate the model
-model = SmallObjectDetector()
+if __name__ == "__main__":
+    # Instantiate the model
+    model = SmallObjectDetector()
 
-# Print model summary
-print(model)
+    # Print model summary
+    print(model)
 
-# Count parameters
-total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"Total trainable parameters: {total_params:,}")
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total trainable parameters: {total_params:,}")
