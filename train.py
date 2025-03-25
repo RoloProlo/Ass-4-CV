@@ -92,98 +92,63 @@ def yolo_loss(predictions, bboxes, labels, lambda_coord=5, lambda_noobj=0.5):
     return total_loss
 
 
-# Function for training the object detector model
-def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5):
+def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="best_model.pth"):
     """
-    Train an object detection model (like YOLOv1) on the dog-cat detection dataset with early stopping.
-
-    Args:
-        model: The object detection model (e.g., SmallObjectDetector).
-        train_dataset: The training dataset.
-        val_dataset: The validation dataset.
-        num_epochs: Number of epochs to train.
-        batch_size: The batch size for training.
-        learning_rate: The learning rate for the optimizer.
-        patience: Early stopping patience, i.e., number of epochs without improvement.
+    Train an object detection model and save the best-performing model.
     """
-    # Select device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    # Prepare DataLoader for training and validation
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
-    # Define the optimizer
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Early stopping variables
     best_val_loss = float("inf")
     no_improve_epochs = 0
 
-    # Training loop
     for epoch in range(num_epochs):
-        model.train()  # Set model to training mode
+        model.train()
         running_train_loss = 0.0
 
-        # Iterate over the training dataset
-        for images, bboxes, labels, _ in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
-            images = images.to(device)
-            bboxes = bboxes.to(device)
-            labels = labels.to(device)
+        for images, bboxes, labels, _ in train_loader:
+            images, bboxes, labels = images.to(device), bboxes.to(device), labels.to(device)
 
-            # Zero the gradients
             optimizer.zero_grad()
-
-            # Forward pass
             predictions = model(images)
-
-            # Calculate YOLO loss (pass bboxes and labels separately)
-            loss = yolo_loss(predictions, bboxes, labels)  # Pass bboxes and labels separately, not as a tuple
-
-            # Backward pass and optimize
+            loss = yolo_loss(predictions, bboxes, labels)
             loss.backward()
             optimizer.step()
 
             running_train_loss += loss.item()
 
-        # Average training loss for this epoch
         avg_train_loss = running_train_loss / len(train_loader)
 
-        # Validation phase
-        model.eval()  # Set model to evaluation mode
+        # Validation
+        model.eval()
         running_val_loss = 0.0
-
         with torch.no_grad():
             for images, bboxes, labels, _ in val_loader:
-                images = images.to(device)
-                bboxes = bboxes.to(device)
-                labels = labels.to(device)
-
-                # Forward pass
+                images, bboxes, labels = images.to(device), bboxes.to(device), labels.to(device)
                 predictions = model(images)
-
-                # Calculate YOLO loss (pass bboxes and labels separately)
                 val_loss = yolo_loss(predictions, bboxes, labels)
-
                 running_val_loss += val_loss.item()
 
-        # Average validation loss for this epoch
         avg_val_loss = running_val_loss / len(val_loader)
 
-        print(f"Epoch [{epoch+1}/{num_epochs}] | "
-              f"Train Loss: {avg_train_loss:.4f} | "
-              f"Val Loss: {avg_val_loss:.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
-        # Early stopping check
+        # Save the model if validation loss improves
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            no_improve_epochs = 0  # Reset counter
+            no_improve_epochs = 0
+            torch.save(model.state_dict(), save_path)  # Save model
+            print(f"✅ Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
         else:
             no_improve_epochs += 1
 
         if no_improve_epochs >= patience:
-            print(f"Early stopping triggered at epoch {epoch + 1}")
+            print(f"⏹ Early stopping triggered at epoch {epoch + 1}")
             break
 
-    print("Training complete.")
+    print("🎉 Training complete.")
