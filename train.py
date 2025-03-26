@@ -5,8 +5,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
 import os
+import torch.nn.functional as F
 
-# Dit is een comment voor saus
 
 def collate_fn(batch):
     """
@@ -44,54 +44,71 @@ def collate_fn(batch):
 
 
 # Define the loss components from YOLOv1
-def yolo_loss(predictions, bboxes, labels, lambda_coord=5, lambda_noobj=0.5):
+import torch.nn.functional as F
+
+def yolo_loss(predictions, targets, S=7, B=1, C=2, lambda_coord=5, lambda_noobj=0.5):
     """
-    YOLOv1 Loss Function: calculates the total loss for object detection.
-
-    Args:
-        predictions (tensor): Predicted values from the model, shape [batch_size, S, S, B * 5 + C]
-        bboxes (tensor): Ground truth bounding boxes, shape [batch_size, num_boxes, 4] (x, y, w, h)
-        labels (tensor): Ground truth class labels, shape [batch_size, num_boxes]
-        lambda_coord (float): Weight for localization loss.
-        lambda_noobj (float): Weight for confidence loss (for no-object cells).
-
-    Returns:
-        total_loss (tensor): Total loss computed for the batch.
+    YOLO-style loss function for model output of shape [batch, 343]
+    targets: should be of shape [batch, S, S, 5 + C]
     """
-    # Initialize loss components
-    coord_loss = 0.0
-    conf_loss = 0.0
-    class_loss = 0.0
 
-    # Extract the number of grid cells (S) and number of boxes per cell (B)
-    B = 2  # Number of bounding boxes per grid cell, this could be 2, 5, etc. depending on your configuration
-    S = 7  # The number of grid cells in both height and width (usually 7 for YOLOv1)
 
-    # Reshape predictions to match the expected format: [batch_size, S, S, B * 5 + C]
-    pred_boxes = predictions[..., :4]  # Bounding box predictions (x, y, w, h)
-    pred_conf = predictions[..., 4:5]  # Confidence scores
-    pred_class = predictions[..., 5:]  # Class probabilities
+    # Split components
+    pred_box = predictions[..., 0:4]  # x, y, w, h
+    pred_obj = predictions[..., 4]    # objectness
+    pred_cls = predictions[..., 5:]   # class scores
 
-    # Iterate through each sample in the batch
-    for i in range(predictions.size(0)):  # Loop through batch size
-        # For each sample, compare each ground truth bounding box with predicted boxes
-        for j in range(bboxes.size(1)):  # Loop through ground truth boxes per sample
-            # Extract true bounding box and class label for the current box
-            true_bbox = bboxes[i, j]  # [4] (x, y, w, h)
-            true_label = labels[i, j]  # Class label for the current bounding box
+    # Targets
+    target_box = targets[..., 0:4]
+    target_obj = targets[..., 4]
+    target_cls = targets[..., 5:]
 
-            # Localization Loss (x, y, w, h)
-            coord_loss += lambda_coord * torch.sum(torch.abs(pred_boxes[i] - true_bbox))
+    # Object mask: where there is an object in the cell
+    obj_mask = target_obj > 0
 
-            # Confidence Loss (objectness loss)
-            conf_loss += torch.sum(torch.abs(pred_conf[i] - true_label))
+    # Coordinate loss (only where there's an object)
+    coord_loss = F.mse_loss(pred_box[obj_mask], target_box[obj_mask], reduction='sum')
 
-            # Classification Loss
-            class_loss += torch.sum(torch.abs(pred_class[i] - true_label))
+    # Objectness loss
+    obj_loss = F.mse_loss(pred_obj[obj_mask], target_obj[obj_mask], reduction='sum')
+    noobj_loss = F.mse_loss(pred_obj[~obj_mask], target_obj[~obj_mask], reduction='sum')
 
-    # Total loss (sum of all components)
-    total_loss = coord_loss + conf_loss + class_loss
+    # Classification loss (only where there's an object)
+    class_loss = F.binary_cross_entropy_with_logits(pred_cls[obj_mask], target_cls[obj_mask], reduction='sum')
+
+    total_loss = lambda_coord * coord_loss + obj_loss + lambda_noobj * noobj_loss + class_loss
     return total_loss
+
+def build_targets(bboxes, labels, S=7, C=2, image_size=112):
+    """
+    Converts bounding boxes and labels to YOLO target tensor of shape [batch, S, S, 5 + C]
+    """
+    batch_size = bboxes.shape[0]
+    targets = torch.zeros((batch_size, S, S, 5 + C), dtype=torch.float32)
+
+    for i in range(batch_size):
+        for j in range(len(bboxes[i])):
+            box = bboxes[i][j]
+            label = labels[i][j]
+            if label == -1:
+                continue  # skip padding
+
+            x_center = (box[0] + box[2]) / 2 / 112
+            y_center = (box[1] + box[3]) / 2 / 112
+            w = (box[2] - box[0]) / 112
+            h = (box[3] - box[1]) / 112
+
+            grid_x = int(x_center * S)
+            grid_y = int(y_center * S)
+
+            if grid_x >= S: grid_x = S - 1
+            if grid_y >= S: grid_y = S - 1
+
+            targets[i, grid_y, grid_x, 0:4] = torch.tensor([x_center, y_center, w, h])
+            targets[i, grid_y, grid_x, 4] = 1.0  # objectness
+            targets[i, grid_y, grid_x, 5 + label] = 1.0  # one-hot class
+
+    return targets
 
 
 def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="best_model.pth"):
@@ -118,7 +135,9 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
 
             optimizer.zero_grad()
             predictions = model(images)
-            loss = yolo_loss(predictions, bboxes, labels)
+            targets = build_targets(bboxes, labels)
+            targets = targets.to(device)
+            loss = yolo_loss(predictions, targets)
             loss.backward()
             optimizer.step()
 
@@ -133,7 +152,9 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
             for images, bboxes, labels, _ in val_loader:
                 images, bboxes, labels = images.to(device), bboxes.to(device), labels.to(device)
                 predictions = model(images)
-                val_loss = yolo_loss(predictions, bboxes, labels)
+                targets = build_targets(bboxes, labels)
+                targets = targets.to(device)
+                val_loss = yolo_loss(predictions, targets)
                 running_val_loss += val_loss.item()
 
         avg_val_loss = running_val_loss / len(val_loader)
