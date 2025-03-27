@@ -52,6 +52,9 @@ def yolo_loss(predictions, targets, S=7, B=1, C=2, lambda_coord=5, lambda_noobj=
     targets: should be of shape [batch, S, S, 5 + C]
     """
 
+    # ✅ Reshape predictions to [B, S, S, 5 + C]
+    predictions = predictions.view(-1, S, S, 5 + C)
+
 
     # Split components
     pred_box = predictions[..., 0:4]  # x, y, w, h
@@ -172,7 +175,7 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             no_improve_epochs = 0
-            torch.save(model.state_dict(), f'models/'+save_path+'pth')  # Save model
+            torch.save(model.state_dict(), f'models/'+save_path+'.pth')  # Save model
             print(f"✅ Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
         else:
             no_improve_epochs += 1

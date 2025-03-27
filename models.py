@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 class SmallObjectDetector(nn.Module):
     def __init__(self):
         super(SmallObjectDetector, self).__init__()
@@ -19,16 +24,17 @@ class SmallObjectDetector(nn.Module):
         self.bn3 = nn.BatchNorm2d(64)
         self.pool3 = nn.MaxPool2d(2, 2)  # 28 → 14
 
-        self.conv4 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.bn4 = nn.BatchNorm2d(128)
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)  # ✅ as per spec: 64 kernels
+        self.bn4 = nn.BatchNorm2d(64)
         self.pool4 = nn.MaxPool2d(2, 2)  # 14 → 7
 
-        # Final conv before prediction head
-        self.conv5 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
-        self.bn5 = nn.BatchNorm2d(64)
+        self.conv5 = nn.Conv2d(64, 32, kernel_size=3, padding=1)  # ✅ as per spec: 32 kernels
+        self.bn5 = nn.BatchNorm2d(32)
 
-        # Head: 7 outputs per grid cell (4 box, 1 obj, 2 class)
-        self.head = nn.Conv2d(64, 7, kernel_size=1)  # preserves 7x7
+        # Flatten + FC Layers
+        self.dropout = nn.Dropout(0.4)
+        self.fc1 = nn.Linear(7 * 7 * 32, 512)
+        self.fc2 = nn.Linear(512, 343)
 
     def forward_conv_layers(self, x):
         x = self.pool1(F.relu(self.bn1(self.conv1(x))))
@@ -39,10 +45,54 @@ class SmallObjectDetector(nn.Module):
         return x
 
     def forward(self, x):
-        x = self.forward_conv_layers(x)     # [B, 64, 7, 7]
-        x = self.head(x)                    # [B, 7, 7, 7]
-        x = x.permute(0, 2, 3, 1)           # [B, 7, 7, 7] for YOLO format
+        x = self.forward_conv_layers(x)          # [B, 32, 7, 7]
+        x = x.view(x.size(0), -1)                # Flatten to [B, 1568]
+        x = F.relu(self.fc1(x))                  # FC(512)
+        x = self.dropout(x)                      # Dropout
+        x = torch.sigmoid(self.fc2(x))           # Output layer + sigmoid
         return x
+
+# class SmallObjectDetector(nn.Module):
+#     def __init__(self):
+#         super(SmallObjectDetector, self).__init__()
+#
+#         # Convolutional backbone (input 112x112)
+#         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1)
+#         self.bn1 = nn.BatchNorm2d(16)
+#         self.pool1 = nn.MaxPool2d(2, 2)  # 112 → 56
+#
+#         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+#         self.bn2 = nn.BatchNorm2d(32)
+#         self.pool2 = nn.MaxPool2d(2, 2)  # 56 → 28
+#
+#         self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+#         self.bn3 = nn.BatchNorm2d(64)
+#         self.pool3 = nn.MaxPool2d(2, 2)  # 28 → 14
+#
+#         self.conv4 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+#         self.bn4 = nn.BatchNorm2d(128)
+#         self.pool4 = nn.MaxPool2d(2, 2)  # 14 → 7
+#
+#         # Final conv before prediction head
+#         self.conv5 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+#         self.bn5 = nn.BatchNorm2d(64)
+#
+#         # Head: 7 outputs per grid cell (4 box, 1 obj, 2 class)
+#         self.head = nn.Conv2d(64, 7, kernel_size=1)  # preserves 7x7
+#
+#     def forward_conv_layers(self, x):
+#         x = self.pool1(F.relu(self.bn1(self.conv1(x))))
+#         x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+#         x = self.pool3(F.relu(self.bn3(self.conv3(x))))
+#         x = self.pool4(F.relu(self.bn4(self.conv4(x))))
+#         x = F.relu(self.bn5(self.conv5(x)))
+#         return x
+#
+#     def forward(self, x):
+#         x = self.forward_conv_layers(x)     # [B, 64, 7, 7]
+#         x = self.head(x)                    # [B, 7, 7, 7]
+#         x = x.permute(0, 2, 3, 1)           # [B, 7, 7, 7] for YOLO format
+#         return x
 
 if __name__ == "__main__":
     model = SmallObjectDetector()

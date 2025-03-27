@@ -12,7 +12,8 @@ S, C = 7, 2
 # Postprocess predictions
 
 def postprocess(pred, threshold=0.5):
-    pred = pred.squeeze(0).detach().cpu().numpy()  # shape: [7, 7, 7]
+    pred = pred.squeeze(0).detach().cpu().numpy()  # shape: [343]
+    pred = pred.reshape((S, S, 5 + C))             # ✅ [7, 7, 7]
     detections = []
     for i in range(S):
         for j in range(S):
