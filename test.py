@@ -1,75 +1,137 @@
 import torch
-from torch.utils.data import DataLoader
-from data_loader import stratified_split
-from train import collate_fn
-from models import SmallObjectDetector
-from train import yolo_loss, build_targets
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_curve, auc
+from models import SmallObjectDetector
+from data_loader import stratified_split
+from torch.utils.data import DataLoader
+from train import collate_fn
+from collections import defaultdict
 
-# Hyperparameters
-epochs = 30
-batch_size = 32
-lr = 0.001
-patience = 5
 S, C = 7, 2
+IMG_SIZE = 112
 
-# Setup
-train_dataset, val_dataset = stratified_split()
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+def compute_iou(box1, box2):
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = area1 + area2 - inter
+    return inter / union if union > 0 else 0
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = SmallObjectDetector().to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-best_val_loss = float("inf")
+def postprocess(pred, threshold=0.5):
+    pred = pred.squeeze(0).detach().cpu().numpy().reshape((S, S, 5 + C))
+    detections = []
+    for i in range(S):
+        for j in range(S):
+            cell = pred[i, j]
+            objectness = cell[4]
+            if objectness > threshold:
+                x_center, y_center, w, h = cell[0:4]
+                cls_scores = cell[5:]
+                predicted_class = int(np.argmax(cls_scores))
 
-print("\n========== Training ==========")
-for epoch in range(epochs):
-    model.train()
-    total_train_loss = 0
-    for images, bboxes, labels, _ in train_loader:
-        images, bboxes, labels = images.to(device), bboxes.to(device), labels.to(device)
-        targets = build_targets(bboxes, labels).to(device)
+                grid_size = IMG_SIZE / S
+                cx = (j + x_center) * grid_size
+                cy = (i + y_center) * grid_size
+                bw = w * IMG_SIZE
+                bh = h * IMG_SIZE
 
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = yolo_loss(outputs, targets)
-        loss.backward()
-        optimizer.step()
-        total_train_loss += loss.item()
+                xmin = cx - bw / 2
+                ymin = cy - bh / 2
+                xmax = cx + bw / 2
+                ymax = cy + bh / 2
 
-    avg_train_loss = total_train_loss / len(train_loader)
-    print(f"Epoch {epoch+1}: Train Loss = {avg_train_loss:.4f}")
+                detections.append({
+                    "class": predicted_class,
+                    "bbox": [xmin, ymin, xmax, ymax],
+                    "score": objectness
+                })
+    return detections
 
-print("\n========== Evaluation ==========")
-model.eval()
-y_true, y_pred = [], []
-with torch.no_grad():
-    for images, bboxes, labels, _ in val_loader:
-        images = images.to(device)
-        outputs = model(images)[0]  # shape [7,7,7]
-        outputs = outputs.detach().cpu().numpy()
+def compute_ap(class_id, predictions, ground_truths, iou_threshold=0.5):
+    tp = []
+    scores = []
+    gt = ground_truths[class_id]
+    n_gt = len(gt)
+    matched = [False] * n_gt
 
-        for i in range(S):
-            for j in range(S):
-                cell = outputs[i, j]
-                obj = cell[4]
-                if obj > 0.5:
-                    pred_cls = np.argmax(cell[5:])
-                    for k in range(len(labels[0])):
-                        if labels[0][k] != -1:
-                            y_true.append(labels[0][k].item())
-                            y_pred.append(pred_cls)
+    for pred_box, score in sorted(predictions[class_id], key=lambda x: -x[1]):
+        scores.append(score)
+        ious = [compute_iou(pred_box, gt_box) for gt_box in gt]
+        best_idx = np.argmax(ious) if ious else -1
 
-if len(y_true) > 0:
-    conf_matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
-    disp = ConfusionMatrixDisplay(conf_matrix, display_labels=["cat", "dog"])
-    disp.plot(cmap=plt.cm.Blues)
-    plt.title("Confusion Matrix - After Training")
+        if ious and ious[best_idx] >= iou_threshold and not matched[best_idx]:
+            tp.append(1)
+            matched[best_idx] = True
+        else:
+            tp.append(0)
+
+    if not tp:
+        return 0.0
+
+    tp = np.array(tp)
+    fp = 1 - tp
+    tp_cum = np.cumsum(tp)
+    fp_cum = np.cumsum(fp)
+    recalls = tp_cum / (n_gt + 1e-6)
+    precisions = tp_cum / (tp_cum + fp_cum + 1e-6)
+    return auc(recalls, precisions)
+
+if __name__ == '__main__':
+    _, val_dataset = stratified_split()
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+
+    model = SmallObjectDetector()
+    model.load_state_dict(torch.load("models/best_model.pth", map_location=torch.device('cpu')))
+    model.eval()
+    model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+
+    thresholds = np.linspace(0.1, 0.9, 9)
+    best_map = 0.0
+    best_threshold = 0.0
+    mAP_scores = []
+
+    for threshold in thresholds:
+        gt_boxes = defaultdict(list)
+        pred_boxes = defaultdict(list)
+
+        with torch.no_grad():
+            for images, bboxes, labels, _ in val_loader:
+                images = images.to(next(model.parameters()).device)
+                outputs = model(images)
+                detections = postprocess(outputs, threshold=threshold)
+
+                for box, label in zip(bboxes[0], labels[0]):
+                    if label != -1:
+                        gt_boxes[label.item()].append(box.tolist())
+
+                for det in detections:
+                    pred_boxes[det["class"]].append((det["bbox"], det["score"]))
+
+        ap_per_class = []
+        for class_id in range(C):
+            ap = compute_ap(class_id, pred_boxes, gt_boxes)
+            ap_per_class.append(ap)
+
+        mean_ap = np.mean(ap_per_class)
+        mAP_scores.append(mean_ap)
+        print(f"Threshold={threshold:.2f} -> mAP={mean_ap:.4f}")
+
+        if mean_ap > best_map:
+            best_map = mean_ap
+            best_threshold = threshold
+
+    # Plotting
+    plt.figure(figsize=(8, 5))
+    plt.plot(thresholds, mAP_scores, marker='o')
+    plt.xlabel("Objectness Threshold")
+    plt.ylabel("mAP (IoU-based)")
+    plt.title("True mAP vs Objectness Threshold")
+    plt.grid(True)
     plt.show()
-else:
-    print("No confident predictions in validation set.")
 
-print("\n✅ Training and evaluation complete")
+    print(f"✅ Best threshold: {best_threshold:.2f} | Best mAP: {best_map:.4f}")
