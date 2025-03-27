@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 import os
 import torch.nn.functional as F
-
+import json
 
 def collate_fn(batch):
     """
@@ -126,6 +126,10 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
     best_val_loss = float("inf")
     no_improve_epochs = 0
 
+    # create variables to save data
+    training_loss = []
+    validation_loss = []
+
     for epoch in range(num_epochs):
         model.train()
         running_train_loss = 0.0
@@ -161,11 +165,14 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
 
         print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
+        training_loss.append(avg_train_loss)
+        validation_loss.append(avg_val_loss)
+
         # Save the model if validation loss improves
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             no_improve_epochs = 0
-            torch.save(model.state_dict(), save_path)  # Save model
+            torch.save(model.state_dict(), f'models/'+save_path)  # Save model
             print(f"✅ Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
         else:
             no_improve_epochs += 1
@@ -173,5 +180,11 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
         if no_improve_epochs >= patience:
             print(f"⏹ Early stopping triggered at epoch {epoch + 1}")
             break
+
+    with open(f'training_results/train_loss{save_path}.json', 'w') as f:
+        json.dump(training_loss, f)
+
+    with open(f'training_results/val_loss{save_path}.json', 'w') as f:
+        json.dump(validation_loss, f)
 
     print("🎉 Training complete.")
