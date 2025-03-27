@@ -111,7 +111,7 @@ def build_targets(bboxes, labels, S=7, C=2, image_size=112):
     return targets
 
 
-def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="best_model.pth"):
+def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="best_model"):
     """
     Train an object detection model and save the best-performing model.
     """
@@ -172,7 +172,7 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             no_improve_epochs = 0
-            torch.save(model.state_dict(), f'models/'+save_path)  # Save model
+            torch.save(model.state_dict(), f'models/'+save_path+'pth')  # Save model
             print(f"✅ Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
         else:
             no_improve_epochs += 1
