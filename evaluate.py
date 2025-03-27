@@ -1,15 +1,13 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, precision_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, average_precision_score
 from models import SmallObjectDetector
 from data_loader import stratified_split
 from torch.utils.data import DataLoader
 from train import collate_fn
 
 S, C = 7, 2
-
-# Postprocess predictions
 
 def postprocess(pred, threshold=0.5):
     pred = pred.squeeze(0).detach().cpu().numpy()  # shape: [7, 7, 7]
@@ -25,7 +23,6 @@ def postprocess(pred, threshold=0.5):
     return detections
 
 if __name__ == '__main__':
-    # Load data and model
     _, val_dataset = stratified_split()
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
 
@@ -42,7 +39,7 @@ if __name__ == '__main__':
 
     print("\n========== Evaluating mAP across thresholds ==========")
     for threshold in thresholds:
-        y_true, y_pred = [], []
+        y_true, y_scores = [], []
 
         with torch.no_grad():
             for images, bboxes, labels, _ in val_loader:
@@ -53,16 +50,16 @@ if __name__ == '__main__':
                 for k in range(len(labels[0])):
                     if labels[0][k] != -1:
                         y_true.extend([labels[0][k].item()] * len(preds))
-                        y_pred.extend(preds)
+                        y_scores.extend([1] * len(preds))  # Assign confidence score 1 to detected objects
 
-        if len(y_true) > 0:
+        if len(y_true) > 0 and len(y_scores) > 0:
             try:
-                prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
-                mAP_scores.append(prec)
-                if prec > best_map:
-                    best_map = prec
+                ap = average_precision_score(y_true, y_scores)
+                mAP_scores.append(ap)
+                if ap > best_map:
+                    best_map = ap
                     best_threshold = threshold
-                    best_conf_matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
+                    best_conf_matrix = confusion_matrix(y_true, y_scores, labels=[0, 1])
             except:
                 mAP_scores.append(0)
         else:
@@ -72,7 +69,7 @@ if __name__ == '__main__':
     plt.figure(figsize=(8, 5))
     plt.plot(thresholds, mAP_scores, marker='o')
     plt.xlabel("Objectness Threshold")
-    plt.ylabel("mAP (macro avg precision)")
+    plt.ylabel("mAP (mean Average Precision)")
     plt.title("mAP vs Objectness Threshold")
     plt.grid(True)
     plt.show()
