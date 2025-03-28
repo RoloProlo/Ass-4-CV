@@ -114,7 +114,7 @@ def build_targets(bboxes, labels, S=7, C=2, image_size=112):
     return targets
 
 
-def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="best_model"):
+def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="CHOICE1"):
     """
     Train an object detection model and save the best-performing model.
     """

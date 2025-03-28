@@ -2,11 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 class SmallObjectDetector(nn.Module):
     def __init__(self):
         super(SmallObjectDetector, self).__init__()
@@ -52,6 +47,79 @@ class SmallObjectDetector(nn.Module):
         x = torch.sigmoid(self.fc2(x))           # Output layer + sigmoid
         return x
 
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, dilation=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=dilation,
+                               dilation=dilation, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        return F.relu(out)
+
+class CHOICE1(nn.Module):
+    def __init__(self):
+        super(CHOICE1, self).__init__()
+
+        # Convolutional Backbone with Residual Connections
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)  # Strided conv instead of max pooling
+        self.bn1 = nn.BatchNorm2d(16)
+
+        self.res1 = ResidualBlock(16, 32, stride=2)
+        self.res2 = ResidualBlock(32, 64, stride=2)
+        self.res3 = ResidualBlock(64, 64, stride=2)
+
+        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=2, dilation=2)  # Dilated conv for larger receptive field
+        self.bn2 = nn.BatchNorm2d(32)
+
+        # Global Average Pooling instead of Fully Connected Layers
+        self.gap = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Linear(32, 343)
+
+    def forward(self, x):
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
+        x = F.relu(self.bn2(self.conv2(x)))
+
+        x = self.gap(x)
+        x = x.view(x.size(0), -1)
+        x = torch.sigmoid(self.fc(x))
+        return x
+
+
+if __name__ == "__main__":
+    model = SmallObjectDetector()
+    print(model)
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total trainable parameters: {total_params:,}")
+
+
+
+
+
+
+
+
+
+
+
+
+
 # class SmallObjectDetector(nn.Module):
 #     def __init__(self):
 #         super(SmallObjectDetector, self).__init__()
@@ -94,11 +162,6 @@ class SmallObjectDetector(nn.Module):
 #         x = x.permute(0, 2, 3, 1)           # [B, 7, 7, 7] for YOLO format
 #         return x
 
-if __name__ == "__main__":
-    model = SmallObjectDetector()
-    print(model)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total trainable parameters: {total_params:,}")
 
 
 # import torch

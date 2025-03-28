@@ -1,6 +1,7 @@
 from data_loader import stratified_split
 from train import train_object_detector
-from models import SmallObjectDetector
+from models import SmallObjectDetector, CHOICE1
+
 
 # Example usage:
 # Define your model, dataset, and other parameters
@@ -19,7 +20,8 @@ def train_model(model, dataset, epochs, batchsize, learnrate, patience):
 
 if __name__ == '__main__':
     dataset = stratified_split()
-    model = SmallObjectDetector()
+    #model = SmallObjectDetector()
+    model = CHOICE1
     epochs = 30
     batchsize = 32
     learnrate = 0.001

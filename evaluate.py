@@ -1,45 +1,18 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, average_precision_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, precision_score
 from models import SmallObjectDetector
 from data_loader import stratified_split
 from torch.utils.data import DataLoader
 from train import collate_fn
 
-S, C = 7, 2  # Grid size & number of classes
-
-
-# Intersection over Union (IoU) Calculation
-def iou(box1, box2):
-    """ Compute IoU between two bounding boxes: [x, y, w, h] """
-    x1, y1, w1, h1 = box1
-    x2, y2, w2, h2 = box2
-
-    # Convert to corner coordinates
-    x1_min, x1_max = x1 - w1 / 2, x1 + w1 / 2
-    y1_min, y1_max = y1 - h1 / 2, y1 + h1 / 2
-    x2_min, x2_max = x2 - w2 / 2, x2 + w2 / 2
-    y2_min, y2_max = y2 - h2 / 2, y2 + h2 / 2
-
-    # Compute intersection
-    xi_min = max(x1_min, x2_min)
-    yi_min = max(y1_min, y2_min)
-    xi_max = min(x1_max, x2_max)
-    yi_max = min(y1_max, y2_max)
-
-    inter_area = max(0, xi_max - xi_min) * max(0, yi_max - yi_min)
-    box1_area = w1 * h1
-    box2_area = w2 * h2
-
-    # Compute IoU
-    union_area = box1_area + box2_area - inter_area
-    return inter_area / union_area if union_area > 0 else 0
-
+S, C = 7, 2
 
 # Postprocess predictions
+
 def postprocess(pred, threshold=0.5):
-    pred = pred.squeeze(0).detach().cpu().numpy().reshape((S, S, 5 + C))
+    pred = pred.squeeze(0).detach().cpu().numpy()  # shape: [7, 7, 7]
     detections = []
     for i in range(S):
         for j in range(S):
@@ -48,10 +21,8 @@ def postprocess(pred, threshold=0.5):
             if objectness > threshold:
                 cls_scores = cell[5:]
                 predicted_class = int(np.argmax(cls_scores))
-                confidence = cls_scores[predicted_class] * objectness
-                detections.append((predicted_class, confidence))  # Store class & confidence
+                detections.append(predicted_class)
     return detections
-
 
 if __name__ == '__main__':
     # Load data and model
@@ -71,7 +42,7 @@ if __name__ == '__main__':
 
     print("\n========== Evaluating mAP across thresholds ==========")
     for threshold in thresholds:
-        y_true, y_scores = [], []
+        y_true, y_pred = [], []
 
         with torch.no_grad():
             for images, bboxes, labels, _ in val_loader:
@@ -81,25 +52,17 @@ if __name__ == '__main__':
 
                 for k in range(len(labels[0])):
                     if labels[0][k] != -1:
-                        y_true.append(labels[0][k].item())
+                        y_true.extend([labels[0][k].item()] * len(preds))
+                        y_pred.extend(preds)
 
-                        # If a prediction exists, get the highest-confidence one
-                        if preds:
-                            best_pred = max(preds, key=lambda x: x[1])  # Highest confidence
-                            y_scores.append(best_pred[1])  # Store confidence score
-                        else:
-                            y_scores.append(0)  # No prediction, assign 0 confidence
-
-        # Compute mAP using sklearn's precision-recall function
-        if len(y_true) > 0 and len(y_scores) > 0:
+        if len(y_true) > 0:
             try:
-                ap = average_precision_score(y_true, y_scores)
-                mAP_scores.append(ap)
-                if ap > best_map:
-                    best_map = ap
+                prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
+                mAP_scores.append(prec)
+                if prec > best_map:
+                    best_map = prec
                     best_threshold = threshold
-                    best_conf_matrix = confusion_matrix(y_true, [1 if score > 0.5 else 0 for score in y_scores],
-                                                        labels=[0, 1])
+                    best_conf_matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
             except:
                 mAP_scores.append(0)
         else:
@@ -109,7 +72,7 @@ if __name__ == '__main__':
     plt.figure(figsize=(8, 5))
     plt.plot(thresholds, mAP_scores, marker='o')
     plt.xlabel("Objectness Threshold")
-    plt.ylabel("mAP (mean Average Precision)")
+    plt.ylabel("mAP (macro avg precision)")
     plt.title("mAP vs Objectness Threshold")
     plt.grid(True)
     plt.show()
