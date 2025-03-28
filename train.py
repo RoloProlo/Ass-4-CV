@@ -80,7 +80,7 @@ def yolo_loss(predictions, targets, S=7, B=1, C=2, lambda_coord=5, lambda_noobj=
     class_loss = F.binary_cross_entropy_with_logits(pred_cls[obj_mask], target_cls[obj_mask], reduction='sum')
 
     total_loss = lambda_coord * coord_loss + obj_loss + lambda_noobj * noobj_loss + class_loss
-    return total_loss
+    return total_loss, coord_loss, obj_loss, noobj_loss, class_loss
 
 def build_targets(bboxes, labels, S=7, C=2, image_size=112):
     """
@@ -114,7 +114,7 @@ def build_targets(bboxes, labels, S=7, C=2, image_size=112):
     return targets
 
 
-def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="CHOICE1"):
+def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batch_size=32, learning_rate=0.001, patience=5, save_path="best_model"):
     """
     Train an object detection model and save the best-performing model.
     """
@@ -129,13 +129,13 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
     best_val_loss = float("inf")
     no_improve_epochs = 0
 
-    # create variables to save data
-    training_loss = []
-    validation_loss = []
+    # create variables to save loss data
+    train_total_loss, train_coord_loss, train_obj_loss, train_noobj_loss, train_class_loss = [], [], [], [], []
+    val_total_loss, val_coord_loss, val_obj_loss, val_noobj_loss, val_class_loss = [], [], [], [], []
 
     for epoch in range(num_epochs):
         model.train()
-        running_train_loss = 0.0
+        running_train_total_loss, running_train_coord_loss, running_train_obj_loss, running_train_noobj_loss, running_train_class_loss = 0.0, 0.0, 0.0, 0.0, 0.0
 
         for images, bboxes, labels, _ in train_loader:
             images, bboxes, labels = images.to(device), bboxes.to(device), labels.to(device)
@@ -144,36 +144,62 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
             predictions = model(images)
             targets = build_targets(bboxes, labels)
             targets = targets.to(device)
-            loss = yolo_loss(predictions, targets)
-            loss.backward()
+            total_loss, coord_loss, obj_loss, noobj_loss, class_loss = yolo_loss(predictions, targets)
+            total_loss.backward()
             optimizer.step()
 
-            running_train_loss += loss.item()
+            running_train_total_loss += total_loss.item()
+            running_train_coord_loss += coord_loss.item()
+            running_train_obj_loss += obj_loss.item()
+            running_train_noobj_loss += noobj_loss.item()
+            running_train_class_loss += class_loss.item()
 
-        avg_train_loss = running_train_loss / len(train_loader)
+        avg_train_total_loss = running_train_total_loss / len(train_loader)
+        avg_train_coord_loss = running_train_coord_loss / len(train_loader)
+        avg_train_obj_loss = running_train_obj_loss / len(train_loader)
+        avg_train_noobj_loss = running_train_noobj_loss / len(train_loader)
+        avg_train_class_loss = running_train_class_loss / len(train_loader)
 
         # Validation
         model.eval()
-        running_val_loss = 0.0
+        running_val_total_loss, running_val_coord_loss, running_val_obj_loss, running_val_noobj_loss, running_val_class_loss = 0.0, 0.0, 0.0, 0.0, 0.0
         with torch.no_grad():
             for images, bboxes, labels, _ in val_loader:
                 images, bboxes, labels = images.to(device), bboxes.to(device), labels.to(device)
                 predictions = model(images)
                 targets = build_targets(bboxes, labels)
                 targets = targets.to(device)
-                val_loss = yolo_loss(predictions, targets)
-                running_val_loss += val_loss.item()
+                total_loss, coord_loss, obj_loss, noobj_loss, class_loss = yolo_loss(predictions, targets)
 
-        avg_val_loss = running_val_loss / len(val_loader)
+                running_val_total_loss += total_loss.item()
+                running_val_coord_loss += coord_loss.item()
+                running_val_obj_loss += obj_loss.item()
+                running_val_noobj_loss += noobj_loss.item()
+                running_val_class_loss += class_loss.item()
 
-        print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        avg_val_total_loss = running_val_total_loss / len(train_loader)
+        avg_val_coord_loss = running_val_coord_loss / len(train_loader)
+        avg_val_obj_loss = running_val_obj_loss / len(train_loader)
+        avg_val_noobj_loss = running_val_noobj_loss / len(train_loader)
+        avg_val_class_loss = running_val_class_loss / len(train_loader)
 
-        training_loss.append(avg_train_loss)
-        validation_loss.append(avg_val_loss)
+        print(f"Epoch [{epoch+1}/{num_epochs}] | Total train Loss: {avg_train_total_loss:.4f} | Total val Loss: {avg_val_total_loss:.4f}")
+
+        train_total_loss.append(avg_train_total_loss)
+        train_coord_loss.append(avg_train_coord_loss)
+        train_obj_loss.append(avg_train_obj_loss)
+        train_noobj_loss.append(avg_train_noobj_loss)
+        train_class_loss.append(avg_train_class_loss)
+
+        val_total_loss.append(avg_val_total_loss)
+        val_coord_loss.append(avg_val_coord_loss)
+        val_obj_loss.append(avg_val_obj_loss)
+        val_noobj_loss.append(avg_val_noobj_loss)
+        val_class_loss.append(avg_val_class_loss)
 
         # Save the model if validation loss improves
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
+        if avg_val_total_loss < best_val_loss:
+            best_val_loss = avg_val_total_loss
             no_improve_epochs = 0
             torch.save(model.state_dict(), f'models/'+save_path+'.pth')  # Save model
             print(f"✅ Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
@@ -184,10 +210,26 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
             print(f"⏹ Early stopping triggered at epoch {epoch + 1}")
             break
 
-    with open(f'training_results/train_loss{save_path}.json', 'w') as f:
-        json.dump(training_loss, f)
+    with open(f'training_results/train_total_loss{save_path}.json', 'w') as f:
+        json.dump(train_total_loss, f)
+    with open(f'training_results/train_coord_loss{save_path}.json', 'w') as f:
+        json.dump(train_coord_loss, f)
+    with open(f'training_results/train_obj_loss{save_path}.json', 'w') as f:
+        json.dump(train_obj_loss, f)
+    with open(f'training_results/train_noobj_loss{save_path}.json', 'w') as f:
+        json.dump(train_noobj_loss, f)
+    with open(f'training_results/train_class_loss{save_path}.json', 'w') as f:
+        json.dump(train_class_loss, f)
 
-    with open(f'training_results/val_loss{save_path}.json', 'w') as f:
-        json.dump(validation_loss, f)
+    with open(f'training_results/val_total_loss{save_path}.json', 'w') as f:
+        json.dump(val_total_loss, f)
+    with open(f'training_results/val_coord_loss{save_path}.json', 'w') as f:
+        json.dump(val_coord_loss, f)
+    with open(f'training_results/val_obj_loss{save_path}.json', 'w') as f:
+        json.dump(val_obj_loss, f)
+    with open(f'training_results/val_noobj_loss{save_path}.json', 'w') as f:
+        json.dump(val_noobj_loss, f)
+    with open(f'training_results/val_class_loss{save_path}.json', 'w') as f:
+        json.dump(val_class_loss, f)
 
     print("🎉 Training complete.")

@@ -86,7 +86,7 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
 
     model = SmallObjectDetector()
-    model.load_state_dict(torch.load("models/best_model.pth", map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load("models/CHOICE1_model.pth", map_location=torch.device('cpu')))
     model.eval()
     model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 

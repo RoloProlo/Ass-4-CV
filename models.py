@@ -47,16 +47,18 @@ class SmallObjectDetector(nn.Module):
         x = torch.sigmoid(self.fc2(x))           # Output layer + sigmoid
         return x
 
-
+################################################################
+#CODE FOR CHOICE TASK 1
+################################################################
 
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, dilation=1):
+    def __init__(self, in_channels, out_channels, stride=1):
         super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=dilation,
-                               dilation=dilation, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
+
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -65,40 +67,50 @@ class ResidualBlock(nn.Module):
             )
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.mish(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
-        return F.relu(out)
+        return F.mish(out)
+
 
 class CHOICE1(nn.Module):
     def __init__(self):
         super(CHOICE1, self).__init__()
 
         # Convolutional Backbone with Residual Connections
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)  # Strided conv instead of max pooling
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(16)
 
         self.res1 = ResidualBlock(16, 32, stride=2)
         self.res2 = ResidualBlock(32, 64, stride=2)
         self.res3 = ResidualBlock(64, 64, stride=2)
 
-        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=2, dilation=2)  # Dilated conv for larger receptive field
+        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm2d(32)
 
-        # Global Average Pooling instead of Fully Connected Layers
+        # Feature Pyramid Fusion
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv_fusion = nn.Conv2d(32, 32, kernel_size=3, padding=1)
+        self.bn_fusion = nn.BatchNorm2d(32)
+
+        # Global Average Pooling Instead of Fully Connected Layers
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(32, 343)
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.mish(self.bn1(self.conv1(x)))
         x = self.res1(x)
         x = self.res2(x)
         x = self.res3(x)
-        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.mish(self.bn2(self.conv2(x)))
+
+        # Multi-Scale Feature Fusion
+        x = self.upsample(x)
+        x = F.mish(self.bn_fusion(self.conv_fusion(x)))
 
         x = self.gap(x)
         x = x.view(x.size(0), -1)
-        x = torch.sigmoid(self.fc(x))
+        x = self.fc(x)  # No sigmoid, use BCEWithLogitsLoss
         return x
 
 
