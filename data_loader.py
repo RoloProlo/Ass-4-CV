@@ -13,14 +13,32 @@ IMG_DIR = "data/images"
 ANNOTATION_DIR = "data/annotations"
 IMG_SIZE = 112  # Target image size (112x112x3)
 
+# Augmentation pipeline
+augmentation_transforms = T.Compose([
+    T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+    T.RandomHorizontalFlip(p=0.5),  # 50% chance to flip
+    T.GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 2.0))  # Mild blurring
+])
 
-# Dataset class for loading images and annotations
+# Standard transformation pipeline
+base_transform = T.Compose([
+    T.Resize((IMG_SIZE, IMG_SIZE)),
+    T.ToTensor()
+])
+
+
 class CatDogDataset:
-    def __init__(self, img_files, ann_files, transform=None):
+    def __init__(self, img_files, ann_files, transform=None, augment=False):
         self.img_files = img_files
         self.ann_files = ann_files
         self.transform = transform
-        self.label_map = {"cat": 0, "dog": 1}  # Label mapping
+        self.augment = augment
+        self.label_map = {"cat": 0, "dog": 1}
+
+        if augment:
+            print(f"Augmenting dataset: {len(self.img_files)} original images → {len(self.img_files) * 2} total images.")
+            self.img_files = self.img_files * 2
+            self.ann_files = self.ann_files * 2  # Duplicate annotations to match images
 
     def parse_annotation(self, ann_path):
         tree = ET.parse(ann_path)
@@ -45,44 +63,43 @@ class CatDogDataset:
         return len(self.img_files)
 
     def __getitem__(self, idx):
-        img_path = self.img_files[idx]
-        ann_path = self.ann_files[idx]
+        """Returns original image or an augmented duplicate if idx is in the second half."""
+        is_augmented = self.augment and idx >= (len(self.img_files) // 2)
+
+        # Get the corresponding original index
+        real_idx = idx % (len(self.img_files) // 2)
+        img_path = self.img_files[real_idx]
+        ann_path = self.ann_files[real_idx]
 
         image = Image.open(img_path).convert("RGB")
         width, height, objects = self.parse_annotation(ann_path)
 
-        # Calculate scaling factors
+        # Scale bounding boxes
         scaler_x = width / IMG_SIZE
         scaler_y = height / IMG_SIZE
-
-        # Transform bounding boxes
-        bboxes = []
-        for obj in objects:
-            xmin = obj['bbox'][0] / scaler_x
-            ymin = obj['bbox'][1] / scaler_y
-            xmax = obj['bbox'][2] / scaler_x
-            ymax = obj['bbox'][3] / scaler_y
-            bboxes.append([xmin, ymin, xmax, ymax])
+        bboxes = [
+            [obj['bbox'][0] / scaler_x, obj['bbox'][1] / scaler_y,
+             obj['bbox'][2] / scaler_x, obj['bbox'][3] / scaler_y]
+            for obj in objects
+        ]
 
         bboxes = torch.tensor(bboxes, dtype=torch.float32)
         labels = torch.tensor([obj["label"] for obj in objects], dtype=torch.int64)
 
+        # Apply transformation
         if self.transform:
             image = self.transform(image)
+
+        # Apply augmentation if applicable
+        if is_augmented:
+            image = augmentation_transforms(image)
 
         return image, bboxes, labels, img_path
 
 
-# Define transformation pipeline
-transform = T.Compose([
-    T.Resize((IMG_SIZE, IMG_SIZE)),
-    T.ToTensor()
-])
-
-
-# Function to manually split dataset with stratification
-def stratified_split():
-    print("Loading dataset...")
+def stratified_split(augment=False):
+    """Loads dataset, applies stratified splitting, and enables augmentation if needed."""
+    print(f"Loading dataset... (Augmentation={'ON' if augment else 'OFF'})")
 
     # Load all image and annotation file paths
     img_files = sorted(glob.glob(os.path.join(IMG_DIR, "*.png")))
@@ -93,7 +110,7 @@ def stratified_split():
     dog_files = [(img, ann) for img, ann in zip(img_files, ann_files) if "dog" in img.lower()]
 
     # Shuffle each category
-    np.random.seed(42)  # Set seed for reproducibility
+    np.random.seed(42)
     np.random.shuffle(cat_files)
     np.random.shuffle(dog_files)
 
@@ -105,23 +122,22 @@ def stratified_split():
     train_data = cat_files[:cat_split] + dog_files[:dog_split]
     val_data = cat_files[cat_split:] + dog_files[dog_split:]
 
-    # Shuffle final datasets again (to mix cats and dogs)
+    # Shuffle final datasets
     np.random.shuffle(train_data)
     np.random.shuffle(val_data)
 
-    # Extract separate lists for images and annotations
+    # Extract lists for images and annotations
     train_img_files, train_ann_files = zip(*train_data)
     val_img_files, val_ann_files = zip(*val_data)
 
     # Create dataset instances
-    train_dataset = CatDogDataset(list(train_img_files), list(train_ann_files), transform=transform)
-    val_dataset = CatDogDataset(list(val_img_files), list(val_ann_files), transform=transform)
+    train_dataset = CatDogDataset(list(train_img_files), list(train_ann_files), transform=base_transform, augment=augment)
+    val_dataset = CatDogDataset(list(val_img_files), list(val_ann_files), transform=base_transform, augment=False)
 
-    print(f"Stratified split complete: {len(train_dataset)} training samples, {len(val_dataset)} validation samples.")
+    print(f"Dataset split: {len(train_dataset)} train samples, {len(val_dataset)} validation samples.")
     return train_dataset, val_dataset
 
 
-# Function to visualize sample images with bounding boxes
 def visualize_samples(dataset, num_samples=4):
     images, bboxes, labels, img_paths = [], [], [], []
 
@@ -156,7 +172,8 @@ def visualize_samples(dataset, num_samples=4):
 
 # Main execution
 if __name__ == "__main__":
-    train_dataset, val_dataset = stratified_split()
+    # Call stratified_split() with augmentation enabled
+    train_dataset, val_dataset = stratified_split(augment=True)
 
     print("Visualizing training samples...")
     visualize_samples(train_dataset)

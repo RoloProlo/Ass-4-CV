@@ -19,7 +19,7 @@ def train_model(model, dataset, epochs, batchsize, learnrate, patience):
 
 
 if __name__ == '__main__':
-    dataset = stratified_split()
+    dataset = stratified_split(augment=True)
     model = SmallObjectDetector()
     #model = CHOICE1()
     epochs = 30
