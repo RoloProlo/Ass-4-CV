@@ -66,7 +66,7 @@ def compute_ap(class_id, predictions, ground_truths, iou_threshold=0.2):
                 iou = compute_iou(pred_box, gt_box)
                 if iou >= iou_threshold and idx not in matched:
                     matched.add(idx)
-                    # ✅ Count as TP for class_id if ground truth is class_id
+                    # Count as TP for class_id if ground truth is class_id
                     if gt_class == class_id:
                         tp.append(1)
                     else:
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.show()
 
-    print(f"✅ Best threshold: {best_threshold:.2f} | Best mAP: {best_map:.4f}")
+    print(f" Best threshold: {best_threshold:.2f} | Best mAP: {best_map:.4f}")
 
     y_true_cm, y_pred_cm = best_confusion
     if y_true_cm and y_pred_cm:

@@ -52,7 +52,7 @@ def yolo_loss(predictions, targets, S=7, B=1, C=2, lambda_coord=5, lambda_noobj=
     targets: should be of shape [batch, S, S, 5 + C]
     """
 
-    # ✅ Reshape predictions to [B, S, S, 5 + C]
+    # Reshape predictions to [B, S, S, 5 + C]
     predictions = predictions.view(-1, S, S, 5 + C)
 
 
@@ -202,12 +202,12 @@ def train_object_detector(model, train_dataset, val_dataset, num_epochs=30, batc
             best_val_loss = avg_val_total_loss
             no_improve_epochs = 0
             torch.save(model.state_dict(), f'models/'+save_path+'.pth')  # Save model
-            print(f"✅ Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
+            print(f" Model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
         else:
             no_improve_epochs += 1
 
         if no_improve_epochs >= patience:
-            print(f"⏹ Early stopping triggered at epoch {epoch + 1}")
+            print(f" Early stopping triggered at epoch {epoch + 1}")
             break
 
     with open(f'training_results/train_total_loss{save_path}.json', 'w') as f:

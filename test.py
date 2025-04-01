@@ -163,7 +163,7 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.show()
 
-    print(f"✅ Best threshold: {best_threshold:.2f} | Best mAP: {best_map:.4f}")
+    print(f" Best threshold: {best_threshold:.2f} | Best mAP: {best_map:.4f}")
 
     # Plot confusion matrix
     y_true_cm, y_pred_cm = best_confusion

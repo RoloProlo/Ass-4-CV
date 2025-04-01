@@ -6,10 +6,10 @@ from evaluate import postprocess
 from torchvision import transforms
 from PIL import Image
 
-# Constants
+
 IMG_SIZE = 112
 S, C = 7, 2
-OBJECTNESS_THRESHOLD = 0.4
+OBJECTNESS_THRESHOLD = 0.5
 CLASS_COLORS = {0: (0, 0, 255), 1: (255, 0, 0)}  # 0=cat (red), 1=dog (blue)
 LABELS = {0: "Cat", 1: "Dog"}
 
@@ -39,16 +39,11 @@ fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
 frame_count = 0
-k = 1
 
 while cap.isOpened() and frame_count < 6000:
     ret, frame = cap.read()
     if not ret:
         break
-
-    # if frame_count % k != 0:
-    #     frame_count += 1
-    #     continue
 
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(frame_rgb)
@@ -73,6 +68,9 @@ while cap.isOpened() and frame_count < 6000:
         cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), CLASS_COLORS[label], 4)
         cv2.putText(frame, f"{LABELS[label]}", (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, CLASS_COLORS[label], 2)
 
+    # Frame counting
+    cv2.putText(frame, f"Frame: {frame_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
     out.write(frame)
     frame_count += 1
 
@@ -83,4 +81,4 @@ while cap.isOpened() and frame_count < 6000:
 cap.release()
 out.release()
 cv2.destroyAllWindows()
-print(f"✅ Output saved to {output_path}")
+print(f"Output saved to {output_path}")
