@@ -21,7 +21,7 @@ ERROR_DIRS = {
     "misclassified_dog_to_cat": "misclassified_dog_to_cat",
     "false_positives": "false_positives",
     "false_negatives": "false_negatives",
-    "poor_localization": "poor_localization",  # New category
+    "poor_localization": "poor_localization",
 }
 
 # Create directories if they don't exist
@@ -96,6 +96,8 @@ if __name__ == "__main__":
     model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     misclassified_images = []
+    false_negatives_cats = 0
+    false_negatives_dogs = 0
 
     with torch.no_grad():
         for idx, (images, bboxes, labels, _) in enumerate(val_loader):
@@ -116,6 +118,12 @@ if __name__ == "__main__":
 
             # Case 1: False Negative (GT exists but no detection)
             if gt_labels_img and not detections:
+                true_label = gt_labels_img[0]
+                if true_label == 0:
+                    false_negatives_cats += 1
+                elif true_label == 1:
+                    false_negatives_dogs += 1
+
                 save_image(images[0], gt_boxes_img[0], "Dog" if true_label == 1 else "Cat", None, None, idx, "false_negatives")
                 continue  # Move to the next image
 
@@ -141,6 +149,10 @@ if __name__ == "__main__":
                 # Case 4: Poor localization (IoU = 0)
                 elif compute_iou(true_box, pred_box) == 0:
                     save_image(images[0], true_box, "Dog" if true_label == 1 else "Cat", pred_box, "Dog" if pred_label == 1 else "Cat", idx, "poor_localization")
+
+    # Print results
+    print(f"False Negatives - Cats: {false_negatives_cats}")
+    print(f"False Negatives - Dogs: {false_negatives_dogs}")
 
     # Display misclassified images
     for img in misclassified_images:
