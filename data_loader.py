@@ -8,6 +8,10 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
+# Comment voor git
+
+aap = 0
+
 # Dataset paths
 IMG_DIR = "data/images"
 ANNOTATION_DIR = "data/annotations"
@@ -96,9 +100,8 @@ class CatDogDataset:
 
         return image, bboxes, labels, img_path
 
-
 def stratified_split(augment=False):
-    """Loads dataset, applies stratified splitting, and enables augmentation if needed."""
+    """Loads dataset, applies stratified splitting (train/val/test), and enables augmentation if needed."""
     print(f"Loading dataset... (Augmentation={'ON' if augment else 'OFF'})")
 
     # Load all image and annotation file paths
@@ -114,28 +117,78 @@ def stratified_split(augment=False):
     np.random.shuffle(cat_files)
     np.random.shuffle(dog_files)
 
-    # Compute 80/20 split index
-    cat_split = int(len(cat_files) * 0.8)
-    dog_split = int(len(dog_files) * 0.8)
+    # Compute split indices (70% train, 15% val, 15% test)
+    def split_data(files):
+        total = len(files)
+        train_split = int(total * 0.7)
+        val_split = int(total * 0.85)
+        return files[:train_split], files[train_split:val_split], files[val_split:]
 
-    # Split into train and validation sets
-    train_data = cat_files[:cat_split] + dog_files[:dog_split]
-    val_data = cat_files[cat_split:] + dog_files[dog_split:]
+    cat_train, cat_val, cat_test = split_data(cat_files)
+    dog_train, dog_val, dog_test = split_data(dog_files)
 
-    # Shuffle final datasets
+    # Combine and shuffle
+    train_data = cat_train + dog_train
+    val_data = cat_val + dog_val
+    test_data = cat_test + dog_test
     np.random.shuffle(train_data)
     np.random.shuffle(val_data)
+    np.random.shuffle(test_data)
 
-    # Extract lists for images and annotations
+    # Extract image and annotation file lists
     train_img_files, train_ann_files = zip(*train_data)
     val_img_files, val_ann_files = zip(*val_data)
+    test_img_files, test_ann_files = zip(*test_data)
 
     # Create dataset instances
-    train_dataset = CatDogDataset(list(train_img_files), list(train_ann_files), transform=base_transform, augment=augment)
+    train_dataset = CatDogDataset(list(train_img_files), list(train_ann_files), transform=base_transform,
+                                  augment=augment)
     val_dataset = CatDogDataset(list(val_img_files), list(val_ann_files), transform=base_transform, augment=False)
+    test_dataset = CatDogDataset(list(test_img_files), list(test_ann_files), transform=base_transform,
+                                 augment=False)
 
-    print(f"Dataset split: {len(train_dataset)} train samples, {len(val_dataset)} validation samples.")
-    return train_dataset, val_dataset
+    print(f"Dataset split: {len(train_dataset)} train, {len(val_dataset)} val, {len(test_dataset)} test samples.")
+    return train_dataset, val_dataset, test_dataset
+
+    # def stratified_split(augment=False):
+    #     """Loads dataset, applies stratified splitting, and enables augmentation if needed."""
+    #     print(f"Loading dataset... (Augmentation={'ON' if augment else 'OFF'})")
+    #
+    #     # Load all image and annotation file paths
+    #     img_files = sorted(glob.glob(os.path.join(IMG_DIR, "*.png")))
+    #     ann_files = sorted(glob.glob(os.path.join(ANNOTATION_DIR, "*.xml")))
+    #
+    #     # Separate images into categories
+    #     cat_files = [(img, ann) for img, ann in zip(img_files, ann_files) if "cat" in img.lower()]
+    #     dog_files = [(img, ann) for img, ann in zip(img_files, ann_files) if "dog" in img.lower()]
+    #
+    #     # Shuffle each category
+    #     np.random.seed(42)
+    #     np.random.shuffle(cat_files)
+    #     np.random.shuffle(dog_files)
+    #
+    #     # Compute 80/20 split index
+    #     cat_split = int(len(cat_files) * 0.8)
+    #     dog_split = int(len(dog_files) * 0.8)
+    #
+    #     # Split into train and validation sets
+    #     train_data = cat_files[:cat_split] + dog_files[:dog_split]
+    #     val_data = cat_files[cat_split:] + dog_files[dog_split:]
+    #
+    #     # Shuffle final datasets
+    #     np.random.shuffle(train_data)
+    #     np.random.shuffle(val_data)
+    #
+    #     # Extract lists for images and annotations
+    #     train_img_files, train_ann_files = zip(*train_data)
+    #     val_img_files, val_ann_files = zip(*val_data)
+    #
+    #     # Create dataset instances
+    #     train_dataset = CatDogDataset(list(train_img_files), list(train_ann_files), transform=base_transform, augment=augment)
+    #     val_dataset = CatDogDataset(list(val_img_files), list(val_ann_files), transform=base_transform, augment=False)
+    #
+    #     print(f"Dataset split: {len(train_dataset)} train samples, {len(val_dataset)} validation samples.")
+    #     return train_dataset, val_dataset
 
 
 def visualize_samples(dataset, num_samples=4):
